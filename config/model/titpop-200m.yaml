@@ -1,0 +1,13 @@
+text_model:
+  class: transformers.LlamaForCausalLM
+  factory: from_pretrained
+  args:
+  - F:\nn\HakuPhi\TITPOP-200M-5ep-ft
+  kwargs:
+    torch_dtype: float16
+    attn_implementation: flash_attention_2
+tokenizer:
+  class: transformers.LlamaTokenizer
+  factory: from_pretrained
+  args:
+  - KBlueLeaf/TITPOP-200M-dev
