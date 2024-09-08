@@ -135,7 +135,7 @@ class CausalLMTrainer(BaseTrainer):
         },
         use_warm_up: bool = True,
         warm_up_period: int = 1000,
-        full_config: dict[str, Any] = {}
+        full_config: dict[str, Any] = {},
     ):
         super(CausalLMTrainer, self).__init__(
             name=name,

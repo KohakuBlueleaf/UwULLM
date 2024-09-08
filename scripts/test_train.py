@@ -32,7 +32,7 @@ if __name__ == "__main__":
         "model": model,
         "dataset": dataset,
         "trainer": trainer,
-        "lightning": lightning
+        "lightning": lightning,
     }
     if seed is not None:
         pl.seed_everything(seed)
@@ -53,8 +53,8 @@ if __name__ == "__main__":
     EPOCH = lightning["epochs"]
     GPUS = lightning["devices"]
     GRAD_ACC = {int(k): int(v) for k, v in lightning["grad_acc"].items()}
-    training_batch_per_epoch = (
-        len(loader) // (GPUS if isinstance(GPUS, int) else len(GPUS))
+    training_batch_per_epoch = len(loader) // (
+        GPUS if isinstance(GPUS, int) else len(GPUS)
     )
     print("Batches per epoch: ", training_batch_per_epoch)
     if isinstance(GRAD_ACC, int):
@@ -72,7 +72,10 @@ if __name__ == "__main__":
             training_step += training_batch_per_epoch // current_acc
     print(GRAD_ACC, grad_acc)
 
-    if "T_max" in trainer.get("lr_sch_configs", {}) and trainer["lr_sch_configs"]["T_max"] < 0:
+    if (
+        "T_max" in trainer.get("lr_sch_configs", {})
+        and trainer["lr_sch_configs"]["T_max"] < 0
+    ):
         trainer["lr_sch_configs"]["T_max"] = training_step
 
     print("Total training step: ", training_step)
@@ -88,9 +91,7 @@ if __name__ == "__main__":
         )
     else:
         trainer_model = CausalLMTrainer(
-            text_model=text_model.float(),
-            **trainer,
-            full_config=config
+            text_model=text_model.float(), **trainer, full_config=config
         )
 
     if lightning["grad_ckpt"]:
@@ -110,9 +111,8 @@ if __name__ == "__main__":
             ModelCheckpoint(every_n_epochs=1),
             GradientAccumulationScheduler(grad_acc),
         ],
-        strategy = DDPStrategy(
-            gradient_as_bucket_view=True,
-            ddp_comm_hook=default.fp16_compress_hook
+        strategy=DDPStrategy(
+            gradient_as_bucket_view=True, ddp_comm_hook=default.fp16_compress_hook
         ),
     )
     trainer.fit(
