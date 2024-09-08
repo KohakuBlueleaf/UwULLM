@@ -17,6 +17,7 @@ from .data.base import BaseFactory
 
 def load_train_config(file):
     config = toml.load(file)
+    seed = config.get("seed", None)
 
     model = config["model"]
     model["config"] = omegaconf.OmegaConf.to_container(
@@ -32,7 +33,7 @@ def load_train_config(file):
     if not lightning["logger"].get("version", None):
         lightning["logger"]["version"] = os.urandom(4).hex()
 
-    return model, dataset, trainer, lightning
+    return seed, model, dataset, trainer, lightning
 
 
 def model_loader(

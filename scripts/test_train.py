@@ -1,36 +1,41 @@
 import warnings
 import sys
+import pickle
 from typing import *
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 import torch.utils.data as Data
 import lightning.pytorch as pl
 import wandb
+from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from lightning.pytorch.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,
     GradientAccumulationScheduler,
 )
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.strategies import DDPStrategy
 
 torch.set_float32_matmul_precision("medium")
 wandb.require("core")
 
-from transformers import PreTrainedModel
-
-from uwul.utils import instantiate_class
 from uwul.loader import load_train_config, load_model, load_dataset
 from uwul.trainer import CausalLMTrainer
-from uwul.data.base import BaseFactory
 
 warnings.filterwarnings("ignore", ".*sequence length is longer than.*")
 
 
-
 if __name__ == "__main__":
-    model, dataset, trainer, lightning = load_train_config(sys.argv[1])
+    seed, model, dataset, trainer, lightning = load_train_config(sys.argv[1])
+    config = {
+        "seed": seed,
+        "model": model,
+        "dataset": dataset,
+        "trainer": trainer,
+        "lightning": lightning
+    }
+    if seed is not None:
+        pl.seed_everything(seed)
 
     text_model, tokenizer = load_model(model["config"])
     ds, ds_factory = load_dataset(dataset, tokenizer)
@@ -79,23 +84,13 @@ if __name__ == "__main__":
             model["ckpt_path"],
             text_model=text_model.float(),
             **trainer,
-            full_config={
-                "model": model,
-                "dataset": dataset,
-                "lightning": lightning,
-                "trainer": trainer,
-            }
+            full_config=config
         )
     else:
         trainer_model = CausalLMTrainer(
             text_model=text_model.float(),
             **trainer,
-            full_config={
-                "model": model,
-                "dataset": dataset,
-                "lightning": lightning,
-                "trainer": trainer,
-            }
+            full_config=config
         )
 
     if lightning["grad_ckpt"]:
@@ -108,18 +103,22 @@ if __name__ == "__main__":
         precision=lightning["precision"],
         gradient_clip_val=lightning["grad_clip"],
         logger=logger,
-        log_every_n_steps=10,
-        # fast_dev_run=True,
-        # max_steps=10,
+        log_every_n_steps=1,
         callbacks=[
             LearningRateMonitor(logging_interval="step"),
-            ModelCheckpoint(every_n_train_steps=10000),
+            ModelCheckpoint(every_n_train_steps=1000),
             ModelCheckpoint(every_n_epochs=1),
             GradientAccumulationScheduler(grad_acc),
         ],
+        strategy = DDPStrategy(
+            gradient_as_bucket_view=True,
+            ddp_comm_hook=default.fp16_compress_hook
+        ),
     )
     trainer.fit(
         trainer_model,
         loader,
         ckpt_path=lightning.get("ckpt_path", None),
     )
+    trainer_model.text_model.save_pretrained(trainer["name"])
+    tokenizer.save_pretrained(trainer["name"])
