@@ -1,0 +1,4 @@
+[model]
+    config="./config/model/titpop-200m.yaml"
+    ckpt_path="NanoLLaMA/342673e6/checkpoints/epoch=0-step=1000.ckpt"
+    name="TITPOP-200M_dan-cc-coyo_1000-step"

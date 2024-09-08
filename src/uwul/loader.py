@@ -36,6 +36,15 @@ def load_train_config(file):
     return seed, model, dataset, trainer, lightning
 
 
+def load_convert_config(file):
+    config = toml.load(file)
+    model = config["model"]
+    model["config"] = omegaconf.OmegaConf.to_container(
+        omegaconf.OmegaConf.load(model["config"]), resolve=True
+    )
+    return model
+
+
 def model_loader(
     text_model: PreTrainedModel | None = None,
     text_model_class=AutoModelForCausalLM,
@@ -56,6 +65,8 @@ def model_loader(
 
 
 def load_trainer(conf: dict, text_model=None):
+    if conf is None:
+        return None
     conf = dict(**conf)
     if text_model is not None:
         conf["text_model"] = text_model
@@ -77,14 +88,3 @@ def load_dataset(conf: dict, tokenizer: PreTrainedTokenizer | None = None):
     processor = dataset_factory.processor(tokenizer, **conf.get("processor_config", {}))
     dataset = dataset_factory.load(conf["split"], processor)
     return dataset, dataset_factory
-
-
-def load_all(conf: dict):
-    dataset_conf = conf.pop("dataset")
-    dataset = instantiate_class(dataset_conf)
-    model_conf = conf.pop("model")
-    text_model, tokenizer = load_model(model_conf)
-    trainer = load_trainer(conf.pop("trainer"), text_model=text_model)
-    # TODO: there might be a better way to handle this
-    dataset.tokenizer = tokenizer
-    return dataset, trainer, (text_model, tokenizer)
