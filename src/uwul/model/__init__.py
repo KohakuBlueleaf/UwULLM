@@ -7,5 +7,6 @@ class AutoModelForCausalLMFactory:
         return AutoModelForCausalLM.from_pretrained(*args, **kwargs)
 
     @classmethod
-    def from_config(cls, config_path: str):
-        return AutoModelForCausalLM.from_config(AutoConfig.from_pretrained(config_path))
+    def from_config(cls, config_path: str, **kwargs):
+        config = AutoConfig.from_pretrained(config_path, **kwargs)
+        return AutoModelForCausalLM.from_config(config)
