@@ -2,6 +2,7 @@
 wandb/
 temp/
 logs/
+models/
 
 # checkpoints
 *.pt
