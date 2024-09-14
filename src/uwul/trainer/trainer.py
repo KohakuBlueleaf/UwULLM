@@ -186,6 +186,7 @@ class CausalLMTrainer(BaseTrainer):
         self.global_total_loss = total_loss[0].cpu().item()
         self.global_total_token_seen = token_seen[0].cpu().item()
         self.global_total_token_trained = token_seen[1].cpu().item()
+        return loss_for_logging
 
     def on_train_epoch_end(self) -> None:
         self.epoch += 1
