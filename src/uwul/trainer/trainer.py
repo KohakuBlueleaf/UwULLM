@@ -165,12 +165,12 @@ class CausalLMTrainer(BaseTrainer):
         self.global_total_token_seen = 0
         self.global_total_token_trained = 0
 
-    def collect_info(self):
+    def collect_info(self, loss):
         if not dist.is_initialized():
             self.global_total_loss = self.total_loss
             self.global_total_token_seen = self.total_token_seen
             self.global_total_token_trained = self.total_token_trained
-            return
+            return loss
         token_seen = torch.tensor(
             [self.total_token_seen, self.total_token_trained],
             dtype=torch.int64,
@@ -179,6 +179,8 @@ class CausalLMTrainer(BaseTrainer):
         total_loss = torch.tensor(
             [self.total_loss], dtype=torch.float64, device=self.device
         )
+        loss_for_logging = loss.clone()
+        dist.all_reduce(loss_for_logging, op=dist.ReduceOp.AVG)
         dist.all_reduce(token_seen, op=dist.ReduceOp.SUM)
         dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
         self.global_total_loss = total_loss[0].cpu().item()
@@ -232,7 +234,7 @@ class CausalLMTrainer(BaseTrainer):
         self.total_token_trained += trained_token_count
 
         if self._trainer is not None:
-            self.collect_info()
+            loss_for_logging = self.collect_info(loss)
             current_total_perplexity = torch.exp(
                 torch.tensor(self.global_total_loss / self.global_total_token_trained)
             )
@@ -240,6 +242,6 @@ class CausalLMTrainer(BaseTrainer):
             self.log("train/token_trained", self.global_total_token_trained)
             self.log("train/batch_perplexity", batch_perplexity)
             self.log("train/total_perplexity", current_total_perplexity)
-            self.log("train/loss", loss, on_step=True, logger=True, prog_bar=True)
+            self.log("train/loss", loss_for_logging, on_step=True, logger=True, prog_bar=True)
 
         return loss
