@@ -1,6 +1,6 @@
 # **WIP**
 
-# UwUDiff
+# UwULLM
 
 Codebase/framework for training Large Language Model. (Not a "trainer")
 
