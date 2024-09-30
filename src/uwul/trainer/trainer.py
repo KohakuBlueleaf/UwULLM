@@ -243,6 +243,8 @@ class CausalLMTrainer(BaseTrainer):
             self.log("train/token_trained", self.global_total_token_trained)
             self.log("train/batch_perplexity", batch_perplexity)
             self.log("train/total_perplexity", current_total_perplexity)
-            self.log("train/loss", loss_for_logging, on_step=True, logger=True, prog_bar=True)
+            self.log(
+                "train/loss", loss_for_logging, on_step=True, logger=True, prog_bar=True
+            )
 
         return loss
