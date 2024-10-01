@@ -1,5 +1,5 @@
 import os
-from typing import *
+from typing import Any, Iterator, Optional
 from itertools import chain
 
 import torch
@@ -23,15 +23,9 @@ class BaseTrainer(pl.LightningModule):
         name: str = "",
         lr: float = 1e-5,
         optimizer: type[optim.Optimizer] = optim.AdamW,
-        opt_config: dict[str, Any] = {
-            "weight_decay": 0.01,
-            "betas": (0.9, 0.999),
-        },
-        lr_scheduler: type[lr_sch.LRScheduler] | None = lr_sch.CosineAnnealingLR,
-        lr_scheduler_config: dict[str, Any] = {
-            "T_max": 100_000,
-            "eta_min": 1e-7,
-        },
+        opt_config: dict[str, Any] = None,
+        lr_scheduler: Optional[type[lr_sch.LRScheduler]] = None,
+        lr_scheduler_config: dict[str, Any] = None,
         use_warm_up: bool = True,
         warm_up_period: int = 1000,
         **kwargs,
@@ -40,10 +34,10 @@ class BaseTrainer(pl.LightningModule):
         self.name = name
         self.train_params: Iterator[nn.Parameter] = None
         self.optimizer = instantiate_class(optimizer)
-        self.opt_config = opt_config
+        self.opt_config = opt_config or {}
         self.lr = lr
         self.lr_sch = instantiate_class(lr_scheduler)
-        self.lr_sch_config = lr_scheduler_config
+        self.lr_sch_config = lr_scheduler_config or {}
         self.use_warm_up = use_warm_up
         self.warm_up_period = warm_up_period
 
@@ -119,23 +113,17 @@ class BaseTrainer(pl.LightningModule):
 class CausalLMTrainer(BaseTrainer):
     def __init__(
         self,
-        text_model: PreTrainedModel = nn.Module(),
+        text_model: PreTrainedModel,
         lycoris_model: Optional[nn.Module] = None,
         name="",
         lr: float = 1e-5,
         optimizer: type[optim.Optimizer] = optim.AdamW,
-        opt_configs: dict[str, Any] = {
-            "weight_decay": 0.01,
-            "betas": (0.9, 0.999),
-        },
-        lr_scheduler: Optional[type[lr_sch.LRScheduler]] = lr_sch.CosineAnnealingLR,
-        lr_sch_configs: dict[str, Any] = {
-            "T_max": 100_000,
-            "eta_min": 1e-7,
-        },
+        opt_configs: dict[str, Any] = None,
+        lr_scheduler: Optional[type[lr_sch.LRScheduler]] = None,
+        lr_sch_configs: dict[str, Any] = None,
         use_warm_up: bool = True,
         warm_up_period: int = 1000,
-        full_config: dict[str, Any] = {},
+        full_config: dict[str, Any] = None,
     ):
         super(CausalLMTrainer, self).__init__(
             name=name,
