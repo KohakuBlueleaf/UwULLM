@@ -78,3 +78,53 @@ def count_params(model, verbose=False):
     if verbose:
         print(f"{model.__class__.__name__} has {total_params * 1.e-6:.2f} M params.")
     return total_params
+
+
+def remove_repeated_suffix(s):
+    """
+    Removes the repeated suffix from the string efficiently using Rolling Hash.
+
+    Args:
+        s (str): The input string.
+
+    Returns:
+        str: The string with the repeated suffix removed.
+    """
+    if not s:
+        return s
+
+    n = len(s)
+    base = 257  # A prime number base for hashing
+    mod = 10**9 + 7  # A large prime modulus to prevent overflow
+
+    # Precompute prefix hashes and powers of the base
+    prefix_hash = [0] * (n + 1)
+    power = [1] * (n + 1)
+
+    for i in range(n):
+        prefix_hash[i + 1] = (prefix_hash[i] * base + ord(s[i])) % mod
+        power[i + 1] = (power[i] * base) % mod
+
+    def get_hash(l, r):
+        return (prefix_hash[r] - prefix_hash[l] * power[r - l]) % mod
+
+    max_k = 0  # To store the maximum k where suffix is repeated
+
+    # Iterate over possible suffix lengths from 1 to n//2
+    for k in range(1, n // 2 + 1):
+        # Compare the last k characters with the k characters before them
+        if get_hash(n - 2 * k, n - k) == get_hash(n - k, n):
+            max_k = k  # Update max_k if a repeated suffix is found
+
+    if max_k > 0:
+        # Remove the extra occurrences of the suffix
+        # Calculate how many times the suffix is repeated consecutively
+        m = 2
+        while max_k * (m + 1) <= n and get_hash(
+            n - (m + 1) * max_k, n - m * max_k
+        ) == get_hash(n - m * max_k, n - (m - 1) * max_k):
+            m += 1
+        # Remove (m-1) copies of the suffix
+        s = s[: n - (m - 1) * max_k]
+
+    return s
