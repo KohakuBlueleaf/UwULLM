@@ -36,4 +36,4 @@ seed=3407
 
 
 [model]
-    config="./config/model/titpop-500m.yaml"
+    config="./config/model/tipo-500m.yaml"

@@ -11,4 +11,4 @@ tokenizer:
   class: transformers.LlamaTokenizer
   factory: from_pretrained
   args:
-  - KBlueLeaf/TITPOP-200M-dev
+  - KBlueLeaf/TIPO-200M

@@ -131,7 +131,7 @@ class CausalLMTrainer(BaseTrainer):
             optimizer=optimizer,
             opt_configs=opt_configs,
             lr_scheduler=lr_scheduler,
-            lr_sch_configs=lr_sch_configs,
+            lr_scheduler_config=lr_sch_configs,
             use_warm_up=use_warm_up,
             warm_up_period=warm_up_period,
         )
