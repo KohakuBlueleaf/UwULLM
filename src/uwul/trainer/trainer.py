@@ -11,7 +11,7 @@ import torch.distributed as dist
 import lightning.pytorch as pl
 from warmup_scheduler import GradualWarmupScheduler
 
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, LlamaForCausalLM
 
 from uwul.utils import instantiate_class
 
@@ -215,7 +215,9 @@ class CausalLMTrainer(BaseTrainer):
             input_ids=input_ids,
             labels=labels,
         )
-        loss = result.loss
+        logit = result.logits
+        loss = F.cross_entropy(logit, labels, reduction="sum", ignore_index=-100)
+        loss = loss / trained_token_count
         batch_perplexity = torch.exp(loss)
 
         self.total_loss += loss.detach().item() * trained_token_count
