@@ -29,7 +29,7 @@ seed=3408
 
 
 [dataset]
-    factory = {class = "dataset_private.titpop.TITPOPDatasetFactory"}
+    factory = {class = "dataset_private.tipo.TIPODatasetFactory"}
     split = ["danbooru", "coyo"]
     [dataset.processor_config]
         cutoff_len = 1024

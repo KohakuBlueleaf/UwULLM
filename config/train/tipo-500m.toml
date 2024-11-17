@@ -11,14 +11,14 @@ seed=3407
     grad_ckpt=true
 
     [lightning.logger]
-        name="TITPOP-500M_dan-cc-coyo"
+        name="TIPO-500M_dan-cc-coyo"
         project="NanoLLaMA"
         version="" # Empty for random id
         offline=false
 
 
 [trainer]
-    name="TITPOP-500M_dan-cc-coyo"
+    name="TIPO-500M_dan-cc-coyo"
     lr=2e-4
     optimizer="torch.optim.AdamW"
     opt_configs = {"weight_decay"= 0.01, "betas"= [0.9, 0.98]}
@@ -29,7 +29,7 @@ seed=3407
 
 
 [dataset]
-    factory = {class = "dataset_private.titpop.TITPOPDatasetFactory"}
+    factory = {class = "dataset_private.tipo.TIPODatasetFactory"}
     split = ["danbooru", "gbc", "coyo"]
     [dataset.processor_config]
         cutoff_len = 2048
