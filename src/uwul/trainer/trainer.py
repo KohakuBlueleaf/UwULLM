@@ -179,7 +179,7 @@ class CausalLMTrainer(BaseTrainer):
     def on_train_epoch_end(self) -> None:
         self.epoch += 1
         if self.lycoris_model is not None:
-            dir = "./lycoris_weight"
+            path = "./lycoris_weight"
             epoch = self.epoch
             if self._trainer is not None:
                 trainer = self._trainer
@@ -194,11 +194,11 @@ class CausalLMTrainer(BaseTrainer):
                     version = (
                         version if isinstance(version, str) else f"version_{version}"
                     )
-                    dir = os.path.join(save_dir, str(name), version, "lycoris_weight")
+                    path = os.path.join(save_dir, str(name), version, "lycoris_weight")
                 else:
                     # if no loggers, use default_root_dir
-                    dir = os.path.join(trainer.default_root_dir, "lycoris_weight")
-            os.makedirs(dir, exist_ok=True)
+                    path = os.path.join(trainer.default_root_dir, "lycoris_weight")
+            os.makedirs(path, exist_ok=True)
             model_weight = {
                 k: v for k, v in self.text_model.named_parameters() if v.requires_grad
             }
@@ -211,13 +211,18 @@ class CausalLMTrainer(BaseTrainer):
         token_count = batch["token_count"]
         trained_token_count = batch["trained_token_count"]
 
-        result = self.text_model(
-            input_ids=input_ids,
-            labels=labels,
-        )
-        logit = result.logits
-        loss = F.cross_entropy(logit, labels, reduction="sum", ignore_index=-100)
-        loss = loss / trained_token_count
+        if getattr(self.text_model, "fused_liger_kernel", False):
+            loss = self.text_model(
+                input_ids=input_ids,
+                labels=labels,
+                num_items_in_batch=trained_token_count
+            ).loss
+        else:
+            result = self.text_model(
+                input_ids=input_ids,
+                labels=labels,
+            )
+            loss = result.loss / trained_token_count
         batch_perplexity = torch.exp(loss)
 
         self.total_loss += loss.detach().item() * trained_token_count
