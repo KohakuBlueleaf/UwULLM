@@ -13,6 +13,7 @@ See internal/corpus-data-setup.md.
 """
 
 import argparse
+import hashlib
 import json
 import multiprocessing as mp
 import os
@@ -99,6 +100,19 @@ def flagged(row: dict, flags: tuple[str, ...]) -> bool:
     return any(row.get(f) for f in flags)
 
 
+def dedup_key(messages: list[dict], mode: str) -> str:
+    """Fingerprint for duplicate detection.
+
+    ``prompt`` keys on the first user message, ``conversation`` on the whole
+    exchange. Keys are held per shard job. See internal/corpus-data-setup.md.
+    """
+    if mode == "prompt":
+        text = next((m["content"] for m in messages if m["role"] == "user"), "")
+    else:
+        text = "\n".join(m["content"] for m in messages)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
 def rows_parquet(path: str):
     import pyarrow.parquet as pq
 
@@ -112,7 +126,7 @@ def convert(job) -> tuple[int, int, int, bool]:
     """Write one vault shard from a list of input files."""
     import kohakuvault as kv
 
-    name, files, index, vault_dir, stage_dir, drop_flags = job
+    name, files, index, vault_dir, stage_dir, drop_flags, dedup_on = job
     stem = name.replace("/", "__")
     final = os.path.join(vault_dir, f"{stem}.{index:04d}.db")
     marker = final + ".done"
@@ -128,7 +142,8 @@ def convert(job) -> tuple[int, int, int, bool]:
 
     vault = kv.KVault(out, page_size=65536, cache_kb=CACHE_KB, mmap_size=MMAP_BYTES)
     vault.enable_auto_pack()
-    count = skipped = dropped = pending = 0
+    count = skipped = dropped = duped = pending = 0
+    seen: set[str] = set()
     batch = []
     began = time.time()
     for file_no, path in enumerate(files, start=1):
@@ -140,6 +155,12 @@ def convert(job) -> tuple[int, int, int, bool]:
             if not usable(messages):
                 skipped += 1
                 continue
+            if dedup_on:
+                key = dedup_key(messages, dedup_on)
+                if key in seen:
+                    duped += 1
+                    continue
+                seen.add(key)
             record = {"messages": messages}
             if row.get("source"):
                 record["subset"] = row["source"]
@@ -155,7 +176,8 @@ def convert(job) -> tuple[int, int, int, bool]:
         print(
             f"  PROGRESS {stem}.{index:04d} file {file_no}/{len(files)} "
             f"{count:>10,} rows {skipped:>8,} unusable {dropped:>8,} flagged "
-            f"{elapsed:6.0f}s {count / max(elapsed, 1):>7,.0f} rows/s",
+            f"{duped:>9,} dup {elapsed:6.0f}s "
+            f"{count / max(elapsed, 1):>7,.0f} rows/s",
             flush=True,
         )
     if batch:
@@ -167,7 +189,7 @@ def convert(job) -> tuple[int, int, int, bool]:
     shutil.move(out, final)
     with open(marker, "w") as handle:
         handle.write(str(count))
-    return index, count, skipped + dropped, False
+    return index, count, skipped + dropped + duped, False
 
 
 def main() -> int:
@@ -185,6 +207,12 @@ def main() -> int:
         metavar="COLUMN",
         help="skip a row when any of these columns is truthy, e.g. toxic redacted",
     )
+    ap.add_argument(
+        "--dedup-on",
+        choices=("prompt", "conversation"),
+        default=None,
+        help="keep one row per prompt, or per whole conversation",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -200,6 +228,7 @@ def main() -> int:
             args.vault,
             args.stage,
             tuple(args.drop_if),
+            args.dedup_on,
         )
         for i in range(0, len(files), args.files_per_shard)
     ]
@@ -209,7 +238,7 @@ def main() -> int:
         flush=True,
     )
     if args.dry_run:
-        for _, group, index, _, _, _ in jobs:
+        for _, group, index, *_ in jobs:
             print(
                 f"  {index:04d}: {len(group)} files, first {os.path.basename(group[0])}"
             )
