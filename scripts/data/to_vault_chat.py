@@ -28,6 +28,7 @@ ROLES = ("system", "user", "assistant", "tool")
 MESSAGE_FIELDS = ("messages", "conversations", "conversation")
 PROMPT_FIELDS = ("instruction", "prompt", "question", "query", "input")
 REPLY_FIELDS = ("response", "output", "completion", "answer")
+SYSTEM_FIELDS = ("system", "system_prompt", "system_message")
 # Per-worker budgets, as in _meta/to_vault.py: both multiply by the worker count.
 BATCH_ROWS = 200_000
 BATCH_BYTES = 512 << 20
@@ -61,9 +62,10 @@ def as_messages(row: dict) -> list[dict]:
     if raw is None:
         prompt = next((row[f] for f in PROMPT_FIELDS if row.get(f)), "")
         reply = next((row[f] for f in REPLY_FIELDS if row.get(f)), "")
+        system = next((row[f] for f in SYSTEM_FIELDS if row.get(f)), "")
         raw = []
-        if row.get("system"):
-            raw.append({"role": "system", "content": row["system"]})
+        if system:
+            raw.append({"role": "system", "content": system})
         if prompt:
             raw.append({"role": "user", "content": prompt})
         if reply:
