@@ -92,6 +92,11 @@ def usable(messages: list[dict]) -> bool:
     return False
 
 
+def flagged(row: dict, flags: tuple[str, ...]) -> bool:
+    """Whether the row carries a truthy value in any of the named columns."""
+    return any(row.get(f) for f in flags)
+
+
 def rows_parquet(path: str):
     import pyarrow.parquet as pq
 
@@ -105,7 +110,7 @@ def convert(job) -> tuple[int, int, int, bool]:
     """Write one vault shard from a list of input files."""
     import kohakuvault as kv
 
-    name, files, index, vault_dir, stage_dir = job
+    name, files, index, vault_dir, stage_dir, drop_flags = job
     stem = name.replace("/", "__")
     final = os.path.join(vault_dir, f"{stem}.{index:04d}.db")
     marker = final + ".done"
@@ -121,11 +126,14 @@ def convert(job) -> tuple[int, int, int, bool]:
 
     vault = kv.KVault(out, page_size=65536, cache_kb=CACHE_KB, mmap_size=MMAP_BYTES)
     vault.enable_auto_pack()
-    count = skipped = pending = 0
+    count = skipped = dropped = pending = 0
     batch = []
     began = time.time()
     for file_no, path in enumerate(files, start=1):
         for row in rows_parquet(path):
+            if drop_flags and flagged(row, drop_flags):
+                dropped += 1
+                continue
             messages = as_messages(row)
             if not usable(messages):
                 skipped += 1
@@ -144,8 +152,8 @@ def convert(job) -> tuple[int, int, int, bool]:
         elapsed = time.time() - began
         print(
             f"  PROGRESS {stem}.{index:04d} file {file_no}/{len(files)} "
-            f"{count:>10,} rows {skipped:>8,} skipped {elapsed:6.0f}s "
-            f"{count / max(elapsed, 1):>7,.0f} rows/s",
+            f"{count:>10,} rows {skipped:>8,} unusable {dropped:>8,} flagged "
+            f"{elapsed:6.0f}s {count / max(elapsed, 1):>7,.0f} rows/s",
             flush=True,
         )
     if batch:
@@ -157,7 +165,7 @@ def convert(job) -> tuple[int, int, int, bool]:
     shutil.move(out, final)
     with open(marker, "w") as handle:
         handle.write(str(count))
-    return index, count, skipped, False
+    return index, count, skipped + dropped, False
 
 
 def main() -> int:
@@ -168,6 +176,13 @@ def main() -> int:
     ap.add_argument("--stage", default=STAGE)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--files-per-shard", type=int, default=FILES_PER_SHARD)
+    ap.add_argument(
+        "--drop-if",
+        nargs="*",
+        default=[],
+        metavar="COLUMN",
+        help="skip a row when any of these columns is truthy, e.g. toxic redacted",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -182,12 +197,17 @@ def main() -> int:
             i // args.files_per_shard,
             args.vault,
             args.stage,
+            tuple(args.drop_if),
         )
         for i in range(0, len(files), args.files_per_shard)
     ]
-    print(f"{args.name}: {len(files)} files -> {len(jobs)} shards", flush=True)
+    print(
+        f"{args.name}: {len(files)} files -> {len(jobs)} shards"
+        f"{', dropping rows flagged ' + '/'.join(args.drop_if) if args.drop_if else ''}",
+        flush=True,
+    )
     if args.dry_run:
-        for _, group, index, _, _ in jobs:
+        for _, group, index, _, _, _ in jobs:
             print(
                 f"  {index:04d}: {len(group)} files, first {os.path.basename(group[0])}"
             )
