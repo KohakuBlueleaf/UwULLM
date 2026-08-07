@@ -38,14 +38,20 @@ CACHE_KB = 256_000
 MMAP_BYTES = 1 << 30
 
 
-def parquet_files(src: str, pattern: str = "*") -> list[str]:
-    """Every parquet under ``src`` matching ``pattern``, skipping the test split."""
+READABLE = (".parquet", ".jsonl", ".json")
+
+
+def input_files(src: str, pattern: str = "*") -> list[str]:
+    """Every readable table under ``src`` matching ``pattern``, minus the test split.
+
+    Reads parquet, JSON Lines, and a JSON file holding a list or ``{"data": [...]}``.
+    """
     out = []
     for dirpath, dirnames, filenames in os.walk(src):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
             if (
-                name.endswith(".parquet")
+                name.endswith(READABLE)
                 and not name.startswith("test-")
                 and fnmatch.fnmatch(name, pattern)
             ):
@@ -136,6 +142,38 @@ def rows_parquet(path: str):
             yield row
 
 
+def rows_jsonl(path: str):
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                yield row
+
+
+def rows_json(path: str):
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        payload = json.load(handle)
+    items = payload if isinstance(payload, list) else payload.get("data", [])
+    for row in items:
+        if isinstance(row, dict):
+            yield row
+
+
+def rows_of(path: str):
+    """Dispatch to the reader for this file's extension."""
+    if path.endswith(".parquet"):
+        return rows_parquet(path)
+    if path.endswith(".jsonl"):
+        return rows_jsonl(path)
+    return rows_json(path)
+
+
 def convert(job) -> tuple[int, int, int, bool]:
     """Write one vault shard from a list of input files."""
     import kohakuvault as kv
@@ -161,7 +199,7 @@ def convert(job) -> tuple[int, int, int, bool]:
     batch = []
     began = time.time()
     for file_no, path in enumerate(files, start=1):
-        for row in rows_parquet(path):
+        for row in rows_of(path):
             if drop_flags and flagged(row, drop_flags):
                 dropped += 1
                 continue
@@ -235,9 +273,9 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    files = parquet_files(args.src, args.pattern)
+    files = input_files(args.src, args.pattern)
     if not files:
-        print(f"no parquet under {args.src}")
+        print(f"no parquet/jsonl/json under {args.src}")
         return 1
     jobs = [
         (
