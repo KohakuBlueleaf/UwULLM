@@ -13,6 +13,7 @@ See internal/corpus-data-setup.md.
 """
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import multiprocessing as mp
@@ -37,13 +38,17 @@ CACHE_KB = 256_000
 MMAP_BYTES = 1 << 30
 
 
-def parquet_files(src: str) -> list[str]:
-    """Every parquet under ``src``, in sorted order, skipping the test split."""
+def parquet_files(src: str, pattern: str = "*") -> list[str]:
+    """Every parquet under ``src`` matching ``pattern``, skipping the test split."""
     out = []
     for dirpath, dirnames, filenames in os.walk(src):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
-            if name.endswith(".parquet") and not name.startswith("test-"):
+            if (
+                name.endswith(".parquet")
+                and not name.startswith("test-")
+                and fnmatch.fnmatch(name, pattern)
+            ):
                 out.append(os.path.join(dirpath, name))
     return sorted(out)
 
@@ -57,8 +62,15 @@ def as_messages(row: dict) -> list[dict]:
     """
     raw = None
     for field in MESSAGE_FIELDS:
-        if row.get(field):
-            raw = row[field]
+        value = row.get(field)
+        # Some sets store the message list as a JSON string in a string column.
+        if isinstance(value, str) and value.lstrip().startswith("["):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                value = None
+        if isinstance(value, (list, tuple)) and value:
+            raw = value
             break
     if raw is None:
         prompt = next((row[f] for f in PROMPT_FIELDS if row.get(f)), "")
@@ -74,6 +86,8 @@ def as_messages(row: dict) -> list[dict]:
 
     messages = []
     for message in raw:
+        if not isinstance(message, dict):
+            continue
         content = (message.get("content") or message.get("value") or "").strip()
         if not content:
             continue
@@ -213,10 +227,15 @@ def main() -> int:
         default=None,
         help="keep one row per prompt, or per whole conversation",
     )
+    ap.add_argument(
+        "--pattern",
+        default="*",
+        help="only convert parquet basenames matching this glob, e.g. 'tool-*'",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    files = parquet_files(args.src)
+    files = parquet_files(args.src, args.pattern)
     if not files:
         print(f"no parquet under {args.src}")
         return 1
