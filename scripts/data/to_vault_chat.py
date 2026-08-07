@@ -31,6 +31,17 @@ MESSAGE_FIELDS = ("messages", "conversations", "conversation")
 PROMPT_FIELDS = ("instruction", "prompt", "question", "query", "input")
 REPLY_FIELDS = ("response", "output", "completion", "answer")
 SYSTEM_FIELDS = ("system", "system_prompt", "system_message")
+TOOL_FIELDS = ("tools", "functions", "tool_schema")
+CALL_FIELDS = ("function_calls", "tool_calls")
+# Reserved at 64021-64024. See internal/chat-template-design.md section 4.
+TOOL_OPEN, TOOL_CLOSE = "<|tool_call|>", "<|/tool_call|>"
+ROLE_ALIASES = {
+    "human": "user",
+    "gpt": "assistant",
+    "environment": "tool",
+    "observation": "tool",
+    "function": "tool",
+}
 # Per-worker budgets, as in _meta/to_vault.py: both multiply by the worker count.
 BATCH_ROWS = 200_000
 BATCH_BYTES = 512 << 20
@@ -59,12 +70,32 @@ def input_files(src: str, pattern: str = "*") -> list[str]:
     return sorted(out)
 
 
+def first_of(row: dict, fields: tuple[str, ...]):
+    """The first truthy value among ``fields``, or ``""``."""
+    for field in fields:
+        value = row.get(field)
+        if value:
+            return value
+    return ""
+
+
+def as_text(value) -> str:
+    """A declaration or call payload as text, whether it arrives as JSON or a string."""
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, ensure_ascii=False)
+
+
 def as_messages(row: dict) -> list[dict]:
     """One parquet row -> ``[{"role", "content"}]``, or ``[]`` if unusable.
 
     Accepts a message list under any of :data:`MESSAGE_FIELDS`, or a flat
     prompt / reply pair. Blank turns are dropped; an unknown role becomes
-    ``user``.
+    ``user``. A tool declaration beside the list, or on a message, is folded
+    into the system turn; a call is wrapped in ``<|tool_call|>``.
+    See internal/chat-template-design.md.
     """
     raw = None
     for field in MESSAGE_FIELDS:
@@ -78,10 +109,11 @@ def as_messages(row: dict) -> list[dict]:
         if isinstance(value, (list, tuple)) and value:
             raw = value
             break
+    from_list = raw is not None
     if raw is None:
-        prompt = next((row[f] for f in PROMPT_FIELDS if row.get(f)), "")
-        reply = next((row[f] for f in REPLY_FIELDS if row.get(f)), "")
-        system = next((row[f] for f in SYSTEM_FIELDS if row.get(f)), "")
+        prompt = first_of(row, PROMPT_FIELDS)
+        reply = first_of(row, REPLY_FIELDS)
+        system = first_of(row, SYSTEM_FIELDS)
         raw = []
         if system:
             raw.append({"role": "system", "content": system})
@@ -95,11 +127,36 @@ def as_messages(row: dict) -> list[dict]:
         if not isinstance(message, dict):
             continue
         content = (message.get("content") or message.get("value") or "").strip()
+        role = (message.get("role") or message.get("from") or "user").lower()
+        role = ROLE_ALIASES.get(role, role)
+        role = role if role in ROLES else "user"
+        # A declaration rides on the system turn, a call on the assistant's.
+        decl = as_text(first_of(message, TOOL_FIELDS))
+        if decl and role == "system":
+            content = f"{content}\n{decl}".strip()
+        call = as_text(first_of(message, CALL_FIELDS))
+        if call:
+            content = f"{content}\n{TOOL_OPEN}{call}{TOOL_CLOSE}".strip()
         if not content:
             continue
-        role = (message.get("role") or message.get("from") or "user").lower()
-        role = {"human": "user", "gpt": "assistant"}.get(role, role)
-        messages.append({"role": role if role in ROLES else "user", "content": content})
+        messages.append({"role": role, "content": content})
+
+    if from_list:
+        head = "\n".join(
+            x
+            for x in (
+                str(first_of(row, SYSTEM_FIELDS)).strip(),
+                as_text(first_of(row, TOOL_FIELDS)),
+            )
+            if x
+        )
+    else:
+        head = ""
+    if head and messages:
+        if messages[0]["role"] == "system":
+            messages[0]["content"] = f"{head}\n{messages[0]['content']}".strip()
+        else:
+            messages.insert(0, {"role": "system", "content": head})
     return messages
 
 

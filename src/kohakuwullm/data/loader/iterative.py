@@ -18,7 +18,12 @@ import torch.utils.data as data
 
 from kohakuwullm.data.filters import build_filter
 from kohakuwullm.data.loader.permute import ShardIndices
-from kohakuwullm.data.packing import PackedBatch, collate_packed, encode_sample
+from kohakuwullm.data.packing import (
+    IGNORE_INDEX,
+    PackedBatch,
+    collate_packed,
+    encode_sample,
+)
 
 
 def pack_to_budget(
@@ -131,6 +136,7 @@ class TokenBudgetIterableDataset(data.IterableDataset):
         val_frac: float = 0.0,
         split: str = "train",
         doc_filter=None,
+        drop_untrained: bool = True,
     ) -> None:
         if k <= 0 or m < 0 or ctx_max <= 0:
             raise ValueError("k and ctx_max must be positive and m non-negative")
@@ -156,6 +162,7 @@ class TokenBudgetIterableDataset(data.IterableDataset):
         self.val_frac = val_frac
         self.split = split
         self.doc_filter = build_filter(doc_filter)
+        self.drop_untrained = drop_untrained
         self._pass = 0
         self._resume: dict[int, dict] = {}
 
@@ -197,11 +204,18 @@ class TokenBudgetIterableDataset(data.IterableDataset):
             rng = random.Random((self.seed * 1_000_003 + epoch) * 1_000_003 + index)
             rendered = self.renderer(rec, rng=rng)
             sample = encode_sample(self.tokenizer, rendered, self.ctx_max)
-            if len(sample["input_ids"]) > 1:
-                sample["index"] = index
-                if outstanding is not None:
-                    outstanding[index] = None
-                yield sample
+            if len(sample["input_ids"]) <= 1:
+                continue
+            # A sample whose targets all fell past ctx_max carries no gradient
+            # and would only occupy the budget. See docs/internals/data.md.
+            if self.drop_untrained and not any(
+                x != IGNORE_INDEX for x in sample["labels"]
+            ):
+                continue
+            sample["index"] = index
+            if outstanding is not None:
+                outstanding[index] = None
+            yield sample
 
     def _begin(self) -> tuple[int, int, dict | None]:
         """This worker's shard, and the resume position armed for it."""
@@ -332,6 +346,7 @@ def build_iterative_loader(
     val_frac: float = 0.0,
     split: str = "train",
     doc_filter=None,
+    drop_untrained: bool = True,
 ) -> data.DataLoader:
     """DataLoader over :class:`TokenBudgetIterableDataset`, single-process.
 
@@ -354,5 +369,6 @@ def build_iterative_loader(
         val_frac=val_frac,
         split=split,
         doc_filter=doc_filter,
+        drop_untrained=drop_untrained,
     )
     return make_loader(dataset, num_workers, prefetch_factor, pin_memory)
